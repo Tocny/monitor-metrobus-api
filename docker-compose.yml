@@ -1,0 +1,40 @@
+services:
+  api:
+    build: .
+    container_name: monitor-metrobus-api
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      # Monta el codigo para desarrollo con auto-reload.
+      # En produccion, quita este volume y usa solo lo copiado en el Dockerfile.
+      - ./app:/code/app
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    restart: unless-stopped
+
+  db:
+    image: postgis/postgis:16-3.4
+    container_name: monitor-metrobus-db
+    environment:
+      POSTGRES_USER: metrobus
+      POSTGRES_PASSWORD: metrobus
+      POSTGRES_DB: metrobus
+    ports:
+      # Expuesto al host solo para poder inspeccionar la BD con un cliente
+      # local (ej. DBeaver, psql) durante desarrollo.
+      - "5432:5432"
+    volumes:
+      - metrobus_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U metrobus -d metrobus"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  metrobus_db_data:
