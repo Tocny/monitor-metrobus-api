@@ -19,10 +19,11 @@ router = APIRouter(prefix="/debug", tags=["debug"])
 @router.get("/feed")
 async def debug_feed():
     """
-    Hace login (o reusa el token cacheado), descarga el feed,
-    lo decodifica, y devuelve un resumen + una muestra de 5 vehiculos.
-    Util para confirmar que METROBUS_TOKEN_FIELD y el mecanismo de
-    autenticacion en .env estan configurados correctamente.
+    Valida contra partnerValidation (o reusa la URL prefirmada
+    cacheada), descarga el feed, lo decodifica, y devuelve un resumen
+    + una muestra de 5 vehiculos. Util para confirmar que
+    METROBUS_API_LOGIN_URL, METROBUS_API_USUARIO y METROBUS_API_SENHA
+    en .env son correctos.
     """
     try:
         vehiculos = await obtener_vehiculos_actuales()

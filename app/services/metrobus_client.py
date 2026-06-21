@@ -1,18 +1,9 @@
 """
-Cliente autenticado contra la API real de Metrobus.
+Cliente autenticado de la API de Metrobus (SONDA).
 
-Reemplaza el link presignado de S3 (temporal, ~12h) que usabamos en
-los scripts de prueba, por un flujo real: login con usuario/contrasena
--> token -> usar el token para pedir el feed -> si el token expira
-(401/403), renovar automaticamente y reintentar una vez.
-
-NOTA IMPORTANTE: los nombres de campo y el mecanismo de autenticacion
-estan parametrizados en Settings porque no conocemos el formato exacto
-de tu API. Si algo no funciona al probarlo, lo primero que hay que
-revisar es:
-  1. metrobus_token_field -- el campo del JSON de login que trae el token
-  2. metrobus_auth_location / metrobus_auth_header_name / metrobus_auth_scheme
-     -- como tu API espera recibir el token de vuelta
+Esas URLs caducan 10 minutos despues de generadas (segun el manual),
+asi que hay que volver a llamar partnerValidation periodicamente para
+refrescarlas.
 """
 
 import asyncio
@@ -24,52 +15,68 @@ from google.transit import gtfs_realtime_pb2
 from app.core.config import Settings, get_settings
 
 TIMEOUT_SEGUNDOS = 15.0
-# Margen de seguridad: renueva el token un poco antes de que expire,
-# no justo en el limite.
-MARGEN_EXPIRACION_SEGUNDOS = 60
+
+# El manual indica 10 minutos de vigencia para las URLs.
+VIGENCIA_ASUMIDA_MINUTOS = 10
+MARGEN_SEGURIDAD_SEGUNDOS = 60
 
 
 class ErrorAutenticacionMetrobus(Exception):
-    """El login fallo o la respuesta no trae el token esperado."""
+    """La validacion fallo o la respuesta no trae los campos esperados."""
 
 
-class TokenManager:
+class UrlManager:
     """
-    Maneja el ciclo de vida del token: login, cache en memoria,
-    renovacion cuando expira. Pensado para vivir como singleton
-    durante toda la vida del proceso (el worker de Fase 3 lo reutiliza
-    en cada ciclo de polling en vez de loguearse cada 30 segundos).
+    Llama a partnerValidation y cachea las URLs prefirmadas
+    (urlRealTime, urlStatic) en memoria hasta que esten por expirar.
+    Pensado para vivir como singleton durante toda la vida del
+    proceso -- el worker de Fase 3 lo reutiliza en cada ciclo de
+    polling en vez de revalidar cada 30 segundos.
     """
 
     def __init__(self, settings: Settings):
         self._settings = settings
-        self._token: str | None = None
+        self._url_realtime: str | None = None
+        self._url_static: str | None = None
         self._expira_en: datetime | None = None
         self._lock = asyncio.Lock()
 
-    async def obtener_token_valido(self) -> str:
-        async with self._lock:
-            if self._token is None or self._esta_por_expirar():
-                await self._login()
-            return self._token  # type: ignore[return-value]
+    async def obtener_url_realtime(self) -> str:
+        url_realtime, _ = await self._obtener_urls()
+        return url_realtime
+
+    async def obtener_url_static(self) -> str:
+        """
+        Bonus: la validacion tambien entrega la URL del GTFS estatico
+        (.zip), que SONDA actualiza diariamente a medianoche. Util si
+        mas adelante se quiere automatizar la recarga de
+        scripts/cargar_gtfs_estatico.py en vez de subir el zip a mano.
+        """
+        _, url_static = await self._obtener_urls()
+        return url_static
 
     def invalidar(self) -> None:
-        """Fuerza un nuevo login en la siguiente solicitud (ej. tras un 401)."""
-        self._token = None
+        """Fuerza una nueva validacion en la siguiente solicitud (ej. tras un 403 de S3)."""
+        self._url_realtime = None
+        self._url_static = None
         self._expira_en = None
+
+    async def _obtener_urls(self) -> tuple[str, str]:
+        async with self._lock:
+            if self._url_realtime is None or self._esta_por_expirar():
+                await self._validar()
+            return self._url_realtime, self._url_static  # type: ignore[return-value]
 
     def _esta_por_expirar(self) -> bool:
         if self._expira_en is None:
-            # La API no informo expiracion -- nos apoyamos en la
-            # deteccion de 401/403 al pedir el feed para renovar.
-            return False
-        limite = self._expira_en - timedelta(seconds=MARGEN_EXPIRACION_SEGUNDOS)
+            return True
+        limite = self._expira_en - timedelta(seconds=MARGEN_SEGURIDAD_SEGUNDOS)
         return datetime.now(timezone.utc) >= limite
 
-    async def _login(self) -> None:
+    async def _validar(self) -> None:
         s = self._settings
         if not s.metrobus_api_login_url:
-            raise ErrorAutenticacionMetrobus("METROBUS_API_LOGIN_URL no esta configurado.")
+            raise ErrorAutenticacionMetrobus("METROBUS_API_LOGIN_URL no esta configurado en .env.")
 
         payload = {"usuario": s.metrobus_api_usuario, "senha": s.metrobus_api_senha}
 
@@ -79,75 +86,63 @@ class TokenManager:
                 resp.raise_for_status()
             except httpx.HTTPStatusError as e:
                 raise ErrorAutenticacionMetrobus(
-                    f"Login rechazado ({e.response.status_code}). "
+                    f"partnerValidation rechazo la solicitud ({e.response.status_code}). "
                     f"Revisa usuario/contrasena en .env. Respuesta: {e.response.text[:300]}"
                 ) from e
             except httpx.RequestError as e:
-                raise ErrorAutenticacionMetrobus(f"No se pudo contactar el login: {e}") from e
+                raise ErrorAutenticacionMetrobus(f"No se pudo contactar partnerValidation: {e}") from e
 
         try:
             data = resp.json()
         except ValueError as e:
             raise ErrorAutenticacionMetrobus(
-                f"El login no devolvio JSON valido: {resp.text[:300]}"
+                f"partnerValidation no devolvio JSON valido: {resp.text[:300]}"
             ) from e
 
-        token = data.get(s.metrobus_token_field)
-        if not token:
+        try:
+            self._url_realtime = data["urlRealTime"]
+            self._url_static = data["urlStatic"]
+        except KeyError as e:
             raise ErrorAutenticacionMetrobus(
-                f"La respuesta del login no trae el campo '{s.metrobus_token_field}'. "
-                f"Campos disponibles: {list(data.keys())}. "
-                f"Ajusta METROBUS_TOKEN_FIELD en .env con el nombre correcto."
-            )
+                f"La respuesta de partnerValidation no trae el campo {e}. "
+                f"Campos recibidos: {list(data.keys())}"
+            ) from e
 
-        self._token = token
-
-        if s.metrobus_token_expiry_field and s.metrobus_token_expiry_field in data:
-            segundos_ttl = int(data[s.metrobus_token_expiry_field])
-            self._expira_en = datetime.now(timezone.utc) + timedelta(seconds=segundos_ttl)
-        else:
-            # Sin info de expiracion: asumimos un TTL conservador y de
-            # todas formas la renovacion-por-401 actua como respaldo.
-            self._expira_en = datetime.now(timezone.utc) + timedelta(
-                seconds=s.metrobus_token_assumed_ttl_seconds
-            )
+        self._expira_en = (
+            datetime.now(timezone.utc)
+            + timedelta(minutes=VIGENCIA_ASUMIDA_MINUTOS)
+            - timedelta(seconds=MARGEN_SEGURIDAD_SEGUNDOS)
+        )
 
 
 class FeedClient:
-    """Descarga y decodifica el feed GTFS-RT usando un token valido."""
+    """Descarga y decodifica el feed GTFS-RT desde la URL prefirmada vigente."""
 
-    def __init__(self, settings: Settings, token_manager: TokenManager):
-        self._settings = settings
-        self._token_manager = token_manager
+    def __init__(self, url_manager: UrlManager):
+        self._url_manager = url_manager
 
     async def descargar_feed_bytes(self) -> bytes:
-        token = await self._token_manager.obtener_token_valido()
-        resp = await self._pedir_feed(token)
+        url_realtime = await self._url_manager.obtener_url_realtime()
+        resp = await self._descargar(url_realtime)
 
-        if resp.status_code in (401, 403):
-            # El token pudo haber expirado sin que lo supieramos
-            # (API sin campo de expiracion, o token revocado). Forzamos
-            # un login nuevo y reintentamos UNA vez.
-            self._token_manager.invalidar()
-            token = await self._token_manager.obtener_token_valido()
-            resp = await self._pedir_feed(token)
+        if resp.status_code >= 400:
+            # La URL prefirmada pudo haber caducado justo en el filo
+            # (S3 normalmente responde 403 con un error tipo
+            # "RequestExpired" en estos casos, a veces 400). Forzamos
+            # una nueva validacion y reintentamos UNA vez.
+            self._url_manager.invalidar()
+            url_realtime = await self._url_manager.obtener_url_realtime()
+            resp = await self._descargar(url_realtime)
 
         resp.raise_for_status()
         return resp.content
 
-    async def _pedir_feed(self, token: str) -> httpx.Response:
-        s = self._settings
-        headers = {}
-        params = {}
-
-        if s.metrobus_auth_location == "query_param":
-            params[s.metrobus_auth_query_param_name] = token
-        else:
-            valor_header = f"{s.metrobus_auth_scheme} {token}".strip()
-            headers[s.metrobus_auth_header_name] = valor_header
-
+    @staticmethod
+    async def _descargar(url: str) -> httpx.Response:
+        # Las URLs prefirmadas de S3 NO necesitan ningun header de
+        # autenticacion -- la firma ya viene embebida en la query string.
         async with httpx.AsyncClient(timeout=TIMEOUT_SEGUNDOS) as client:
-            return await client.get(s.metrobus_feed_url, headers=headers, params=params)
+            return await client.get(url)
 
     @staticmethod
     def decodificar_feed(contenido: bytes) -> gtfs_realtime_pb2.FeedMessage:
@@ -185,14 +180,19 @@ class FeedClient:
 
 # --- Instancias compartidas (singleton simple a nivel de modulo) ---
 # El worker de Fase 3 y los endpoints de debug reutilizan estas mismas
-# instancias para no loguearse de nuevo en cada llamada.
+# instancias para no revalidar en cada llamada.
 _settings = get_settings()
-token_manager = TokenManager(_settings)
-feed_client = FeedClient(_settings, token_manager)
+url_manager = UrlManager(_settings)
+feed_client = FeedClient(url_manager)
 
 
 async def obtener_vehiculos_actuales() -> list[dict]:
-    """Atajo: login (si hace falta) + descarga + decodifica + extrae vehiculos."""
+    """Atajo: valida (si hace falta) + descarga + decodifica + extrae vehiculos."""
     contenido = await feed_client.descargar_feed_bytes()
     feed = feed_client.decodificar_feed(contenido)
     return feed_client.extraer_vehiculos(feed)
+
+
+async def obtener_url_gtfs_estatico() -> str:
+    """Atajo para obtener la URL vigente del GTFS estatico (.zip)."""
+    return await url_manager.obtener_url_static()
