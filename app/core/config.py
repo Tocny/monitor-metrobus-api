@@ -27,25 +27,32 @@ class Settings(BaseSettings):
     environment: str = Field(default="development")  # development | production
     debug: bool = Field(default=True)
 
-    # --- API oficial de Metrobus (datos en tiempo real) ---
+    # --- API oficial de Metrobus (SONDA) ---
+    # Segun el manual de SONDA, este endpoint ("partnerValidation") NO
+    # devuelve un token Bearer -- devuelve directamente dos URLs
+    # prefirmadas de S3 (urlRealTime, urlStatic) listas para descargar
+    # con un GET simple, sin headers de autenticacion adicionales.
+    # Caducan 10 minutos despues de generadas, asi que hay que volver
+    # a llamar este endpoint periodicamente para refrescarlas (ver
+    # app/services/metrobus_client.py).
     metrobus_api_login_url: str = Field(
         default="",
-        description="URL del endpoint POST de login que devuelve el token",
+        description="Endpoint de validacion que devuelve las URLs prefirmadas del feed (METROBUS_API_LOGIN_URL en .env)",
     )
     metrobus_api_usuario: str = Field(default="", repr=False)
     metrobus_api_senha: str = Field(default="", repr=False)
-    metrobus_feed_url: str = Field(
-        default="",
-        description="URL del feed GTFS-RT (puede requerir el token de login)",
-    )
 
     # --- Mapbox ---
     mapbox_token: str = Field(default="", repr=False)
 
-    # --- Base de datos (PostgreSQL + PostGIS) ---
+    # --- Base de datos (PostgreSQL + PostGIS, sin ORM -- via asyncpg) ---
+    # En desarrollo apunta al contenedor local "db" del docker-compose.
+    # En produccion, cambia esto por tu connection string de Supabase
+    # (Project Settings > Database > Connection string > URI), algo como:
+    #   postgresql://postgres:[PASSWORD]@db.[PROJECT-REF].supabase.co:5432/postgres
     database_url: str = Field(
-        default="postgresql+asyncpg://metrobus:metrobus@db:5432/metrobus",
-        description="Cadena de conexion async a PostgreSQL",
+        default="",
+        description="Cadena de conexion a PostgreSQL (DATABASE_URL en .env, formato estandar sin sufijo de driver)",
     )
 
     # --- Parametros del worker de polling ---
