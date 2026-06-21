@@ -16,6 +16,6 @@ venv/
 .vscode/
 .idea/
 
-# Datos GTFS estaticos descargados (pesados, se descargan via script, no se versionan)
+# Datos GTFS estaticos descargados
 *.zip
 /data/
