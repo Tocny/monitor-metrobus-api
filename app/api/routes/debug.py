@@ -1,9 +1,8 @@
 """
-Endpoints TEMPORALES de depuracion -- pensados solo para validar, a
-mano, que el login y la descarga del feed funcionan de extremo a
-extremo. Quitar este router (o protegerlo) antes de exponer el
-servicio publicamente: revela conteos y muestras del feed sin
-autenticacion de tu lado.
+Controller: endpoints temporales de depuracion.
+
+Pensados solo para validar que el feed funciona de extremo a extremo.
+Quitar o proteger antes de exponer el servicio publicamente.
 """
 
 from fastapi import APIRouter, HTTPException
@@ -19,11 +18,10 @@ router = APIRouter(prefix="/debug", tags=["debug"])
 @router.get("/feed")
 async def debug_feed():
     """
-    Valida contra partnerValidation (o reusa la URL prefirmada
-    cacheada), descarga el feed, lo decodifica, y devuelve un resumen
-    + una muestra de 5 vehiculos. Util para confirmar que
-    METROBUS_API_LOGIN_URL, METROBUS_API_USUARIO y METROBUS_API_SENHA
-    en .env son correctos.
+    Valida contra partnerValidation (o reusa las URLs cacheadas),
+    descarga el feed, lo decodifica y devuelve un resumen + muestra
+    de 5 vehiculos. Util para confirmar que las credenciales en .env
+    son correctas y el feed responde.
     """
     try:
         vehiculos = await obtener_vehiculos_actuales()
@@ -32,5 +30,5 @@ async def debug_feed():
 
     return {
         "total_vehiculos": len(vehiculos),
-        "muestra": vehiculos[:5],
+        "muestra": [v.model_dump() for v in vehiculos[:5]],
     }

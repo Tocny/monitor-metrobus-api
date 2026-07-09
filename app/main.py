@@ -1,10 +1,5 @@
 """
 Punto de entrada de la aplicacion.
-
-En esta fase solo se registra el router de health-check. Las rutas de
-negocio (estacion mas cercana, ultimo paso, geojson del mapa) se
-agregan a partir de la Fase 4, una vez que existan los datos
-estaticos (Fase 1) y el worker de polling (Fase 3).
 """
 
 from contextlib import asynccontextmanager
@@ -14,18 +9,17 @@ from fastapi import FastAPI
 from app.api.routes import debug, health
 from app.core.config import get_settings
 from app.db.session import close_pool, init_models
+from app.services.worker import detener_worker, iniciar_worker
 
 settings = get_settings()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Al arrancar: crea las tablas/extensiones si no existen.
-    # Los datos estaticos (rutas/estaciones) se cargan aparte, una sola
-    # vez, con scripts/cargar_gtfs_estatico.py -- no en cada arranque.
     await init_models()
+    await iniciar_worker()
     yield
-    # Al apagar: cierra el pool de conexiones limpiamente.
+    await detener_worker()
     await close_pool()
 
 

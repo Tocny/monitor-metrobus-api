@@ -1,93 +1,88 @@
-# Monitor Metrobús — Fase 0 + Fase 1
+# Monitor Metrobús — Fase 3
 
-Esqueleto del proyecto (FastAPI + PostgreSQL/PostGIS en Docker) más el
-esquema de base de datos y la carga de datos estáticos del GTFS.
+## Qué se construyó
 
-## Qué incluye esta fase
+La Fase 3 implementa el worker de polling en background y la
+refactorización completa del proyecto al patrón
+Controller → Service → Repository → Entity.
 
-**Fase 0:**
-- Estructura del proyecto, configuración por variables de entorno,
-  `docker-compose.yml`, endpoint `/health`.
+### Archivos nuevos
 
-**Fase 1 — Base de datos:**
-- `app/db/schema.py`: el DDL completo (tablas `rutas`, `estaciones`,
-  `ruta_estaciones`, `vehiculos_actuales`, `pasos_registrados`),
-  como SQL directo — sin ORM. Con solo 5 tablas planas sin relaciones
-  de herencia, SQLAlchemy no aportaba valor; `asyncpg` solo (driver
-  async nativo de Postgres) es más simple de leer y depurar.
-- `app/db/session.py`: pool de conexiones async (`asyncpg`) y
-  `init_models()`, que crea las tablas si no existen al arrancar la app.
-- `scripts/cargar_gtfs_estatico.py`: ETL que lee el zip del GTFS
-  estático oficial y puebla esas tablas (UPSERT, idempotente).
-- `app/services/retencion.py`: poda `pasos_registrados` a los últimos
-  10 registros *por cada combinación estación+ruta* (no global), para
-  no perder historial de estaciones poco transitadas.
-- `docs/schema.sql`: el DDL documentado, con ejemplos de consultas
-  (estación más cercana usando el índice espacial GIST, poda de
-  retención).
+**Entidades** (`app/entities/`) — contratos de datos entre capas,
+definidos con Pydantic:
+- `ruta.py` → `Ruta`
+- `estacion.py` → `Estacion`
+- `vehiculo.py` → `Vehiculo` (del feed) y `VehiculoActual` (de la BD)
+- `paso.py` → `PasoRegistrado`
 
-## Desarrollo local vs. producción
+**Repositories** (`app/repositories/`) — solo acceso a datos, sin
+lógica de negocio. Reciben una conexión asyncpg y devuelven entidades:
+- `estaciones_repository.py` → `get_estaciones_de_ruta`, `get_estacion_cercana`
+- `vehiculos_repository.py` → `get_vehiculo`, `upsert_vehiculo`
+- `pasos_repository.py` → `insertar_paso`, `get_ultimo_paso`, `podar_pasos`
 
-En **desarrollo**, `docker-compose.yml` levanta un contenedor
-`postgis/postgis` local — no necesitas cuenta en ningún lado.
+**Services nuevos** (`app/services/`):
+- `geo.py` → `distancia_metros()`: utilidad pura Haversine, sin
+  dependencias del proyecto ni riesgo de imports circulares.
+- `worker.py` → orquesta el ciclo de polling. No contiene SQL ni
+  lógica HTTP — delega todo a repositories y a metrobus_client.
 
-En **producción**, la recomendación es [Supabase](https://supabase.com):
-Postgres administrado con PostGIS disponible gratis (toggle de un
-clic en el dashboard), generoso para esta escala (500 MB, tú usas
-unos cuantos MB). El único punto a vigilar: los proyectos gratuitos
-de Supabase se pausan tras 7 días sin actividad de base de datos —
-pero el worker de la Fase 3 escribe cada 30 segundos mientras esté
-corriendo, así que en la práctica el servicio se mantiene despierto
-solo. El cambio entre ambos entornos es solo la variable
-`DATABASE_URL` en `.env` — el código no se entera de la diferencia.
+### Archivos refactorizados
 
-## Cómo arrancarlo
+- `app/services/metrobus_client.py` → simplificado: sin clases,
+  estado en variables de módulo, devuelve `list[Vehiculo]` en vez
+  de `list[dict]`.
+- `app/api/routes/debug.py` → usa `model_dump()` para serializar
+  entidades `Vehiculo` en la respuesta HTTP.
+- `app/main.py` → el lifespan ahora arranca y detiene el worker.
 
-1. Copia la plantilla de entorno y rellena tus credenciales reales:
+### Archivos eliminados
 
-   ```bash
-   cp .env.example .env
-   ```
+- `app/services/retencion.py` → absorbido por `pasos_repository.py`
+  como `podar_pasos()`, llamado automáticamente dentro de
+  `insertar_paso()`.
 
-2. Levanta todo con Docker Compose:
+## Cómo funciona el worker
 
-   ```bash
-   docker compose up -d --build
-   ```
+Cada 30 segundos (configurable vía `POLLING_INTERVAL_SECONDS` en
+`.env`):
 
-3. Verifica que esté vivo (esto ya debería crear las tablas vacías):
+1. Llama a `metrobus_client.obtener_vehiculos_actuales()` que valida
+   contra `partnerValidation` si las URLs prefirmadas de S3 están por
+   expirar (caducan cada 10 minutos según el manual de SONDA), y
+   descarga + decodifica el feed GTFS-RT.
 
-   ```bash
-   curl http://localhost:8000/health
-   ```
+2. Por cada uno de los ~836 vehículos activos, consulta las estaciones
+   de su ruta (con cache por ciclo para no repetir el mismo SELECT por
+   cada camión de la misma ruta) y calcula si está dentro del radio de
+   alguna estación usando Haversine (`app/services/geo.py`).
 
-4. Copia tu zip del GTFS estático de Metrobús al contenedor y cárgalo:
+3. Si el vehículo estaba FUERA del radio de una estación y ahora está
+   DENTRO → paso confirmado: inserta en `pasos_registrados` y poda
+   la tabla a los últimos 10 registros por combinación estación+ruta.
 
-   ```bash
-   docker compose cp ./Metrobus_GTFS_ESTATICO.zip api:/code/Metrobus_GTFS_ESTATICO.zip
-   docker compose exec api python -m scripts.cargar_gtfs_estatico /code/Metrobus_GTFS_ESTATICO.zip
-   ```
+4. Sobreescribe `vehiculos_actuales` con la posición nueva (UPSERT).
+   Esta tabla nunca crece — siempre tiene una fila por vehículo activo.
 
-   Deberías ver algo como:
+## Verificar que está funcionando
 
-   ```
-   Una sola agencia encontrada: id=1339 nombre='Metrobus'. Se usara directamente.
-   Rutas de Metrobus encontradas: 88
-   Viajes (trips) relevantes: 44491
-   Combinaciones ruta-estacion-sentido: 2085
-   Estaciones distintas usadas: 381
-   Rutas insertadas/actualizadas: 88
-   Estaciones insertadas/actualizadas: 381
-   Relaciones ruta-estacion insertadas/actualizadas: 2085
-   Listo.
-   ```
+```bash
+# Vehículos activos en la BD
+docker compose exec db psql -U metrobus -d metrobus -c \
+  "SELECT COUNT(*) FROM vehiculos_actuales;"
 
-5. (Opcional) Inspecciona los datos cargados conectándote a
-   `localhost:5432` (usuario/clave `metrobus`/`metrobus`) con DBeaver
-   u otro cliente SQL.
+# Últimos pasos detectados
+docker compose exec db psql -U metrobus -d metrobus -c \
+  "SELECT p.label, e.nombre, p.route_id, p.detectado_en
+   FROM pasos_registrados p
+   JOIN estaciones e ON e.stop_id = p.estacion_id
+   ORDER BY p.detectado_en DESC
+   LIMIT 10;"
+```
 
 ## Siguiente paso
 
-Fase 2: el cliente autenticado que hace login contra la API real de
-Metrobús (usuario/contraseña → token) y descarga/decodifica el feed
-GTFS-RT.
+Fase 4 — Endpoints REST:
+- `GET /estaciones/cercana?lat=&lon=` (usando índice GIST de PostGIS)
+- `GET /estaciones/{stop_id}/ultimo-paso?route_id=`
+- `GET /mapa/geojson` (líneas + estaciones para Mapbox)
