@@ -168,6 +168,27 @@ CREATE INDEX IF NOT EXISTS ix_pasos_registrados_detectado_en ON pasos_registrado
 COMMENT ON INDEX ix_pasos_registrados_detectado_en IS 'Índice por tiempo para consultas temporales y para la poda de registros antiguos.';
 
 -- ----------------------------------------------------------------
+-- Tabla: shapes
+-- ----------------------------------------------------------------
+-- Trazos geometricos de cada ruta (shape_id = route_id en este GTFS).
+-- Cada fila es un punto de la polilínea, ordenado por secuencia.
+-- Se usará para trazar las rutas 
+CREATE TABLE IF NOT EXISTS shapes (
+    route_id     TEXT NOT NULL REFERENCES rutas(route_id),
+    secuencia    INTEGER NOT NULL,
+    lat          DOUBLE PRECISION NOT NULL,
+    lon          DOUBLE PRECISION NOT NULL,
+    PRIMARY KEY (route_id, secuencia)
+);
+
+COMMENT ON TABLE shapes IS 'Almacena los puntos (lat, lon) que forman el trazo geográfico de cada ruta. Cada fila es un punto de la polilínea, ordenado por secuencia. route_id es la clave foránea a rutas.';
+
+COMMENT ON COLUMN shapes.route_id IS 'Identificador de la ruta. Coincide con rutas.route_id y con vehicle.trip.route_id del feed GTFS-RT.';
+COMMENT ON COLUMN shapes.secuencia IS 'Orden del punto en la polilínea. Los puntos se deben unir en este orden para dibujar la ruta correctamente.';
+COMMENT ON COLUMN shapes.lat IS 'Latitud del punto en el sistema de coordenadas WGS84 (EPSG:4326).';
+COMMENT ON COLUMN shapes.lon IS 'Longitud del punto en el sistema de coordenadas WGS84 (EPSG:4326).';
+
+-- ----------------------------------------------------------------
 -- La base de datos.
 -- ----------------------------------------------------------------
 COMMENT ON DATABASE metrobus IS 'Base de datos del proyecto Monitor Metrobús. Contiene datos estáticos (rutas, estaciones) y dinámicos (vehículos en tiempo real, pasos registrados). Usa PostGIS para cálculos geográficos.';
