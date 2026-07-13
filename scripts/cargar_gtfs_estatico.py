@@ -1,6 +1,9 @@
 """
-Carga el GTFS estatico de Metrobus en las tablas rutas / estaciones /
-ruta_estaciones, via asyncpg directo (sin ORM).
+Carga el GTFS estatico de Metrobus en las tablas:
+  - rutas
+  - estaciones
+  - ruta_estaciones
+  - shapes
 
 Se corre UNA SOLA VEZ (o cuando Metrobus publique una version nueva
 del GTFS) -- no en cada arranque del servicio. Es idempotente: usa
@@ -120,13 +123,37 @@ def extraer_datos_metrobus(zip_path: str):
         return rutas, estaciones, ruta_estaciones
 
 
-async def cargar_en_base_de_datos(rutas, estaciones, ruta_estaciones):
+def extraer_shapes(zip_path: str, route_ids: set) -> list[tuple]:
+    """
+    Lee shapes.txt y devuelve solo los puntos cuyo shape_id coincide
+    con un route_id ya cargado (shape_id = route_id en este GTFS).
+    """
+    puntos = []
+    with zipfile.ZipFile(zip_path) as z:
+        for fila in leer_csv_de_zip(z, "shapes.txt"):
+            shape_id = fila["shape_id"]
+            if shape_id not in route_ids:
+                continue
+            puntos.append((
+                shape_id,
+                int(fila["shape_pt_sequence"]),
+                float(fila["shape_pt_lat"]),
+                float(fila["shape_pt_lon"]),
+            ))
+    print(f"Puntos de shapes encontrados: {len(puntos)}")
+    return puntos
+
+
+async def cargar_en_base_de_datos(
+    zip_path: str,
+    rutas: dict,
+    estaciones: dict,
+    ruta_estaciones: list,
+) -> None:
     settings = get_settings()
     conn = await asyncpg.connect(settings.database_url)
 
     try:
-        # Asegura que las tablas/extension existan (por si se corre
-        # este script antes de haber levantado la app una vez).
         await conn.execute(DDL_SQL)
 
         # --- Rutas (UPSERT) ---
@@ -154,9 +181,9 @@ async def cargar_en_base_de_datos(rutas, estaciones, ruta_estaciones):
                 INSERT INTO estaciones (stop_id, nombre, lat, lon, ubicacion)
                 VALUES ($1, $2, $3, $4, ST_SetSRID(ST_MakePoint($4, $3), 4326)::geography)
                 ON CONFLICT (stop_id) DO UPDATE SET
-                    nombre = EXCLUDED.nombre,
-                    lat = EXCLUDED.lat,
-                    lon = EXCLUDED.lon,
+                    nombre    = EXCLUDED.nombre,
+                    lat       = EXCLUDED.lat,
+                    lon       = EXCLUDED.lon,
                     ubicacion = EXCLUDED.ubicacion
                 """,
                 [(sid, d["nombre"], d["lat"], d["lon"]) for sid, d in estaciones.items()],
@@ -175,11 +202,27 @@ async def cargar_en_base_de_datos(rutas, estaciones, ruta_estaciones):
                 ruta_estaciones,
             )
             print(f"Relaciones ruta-estacion insertadas/actualizadas: {len(ruta_estaciones)}")
+
+        # --- Shapes (UPSERT) ---
+        shapes = extraer_shapes(zip_path, set(rutas.keys()))
+        if shapes:
+            await conn.executemany(
+                """
+                INSERT INTO shapes (route_id, secuencia, lat, lon)
+                VALUES ($1, $2, $3, $4)
+                ON CONFLICT (route_id, secuencia) DO UPDATE SET
+                    lat = EXCLUDED.lat,
+                    lon = EXCLUDED.lon
+                """,
+                shapes,
+            )
+            print(f"Puntos de shapes insertados/actualizados: {len(shapes)}")
+
     finally:
         await conn.close()
 
 
-async def main_async():
+async def main_async() -> None:
     if len(sys.argv) != 2:
         print("Uso: python -m scripts.cargar_gtfs_estatico /ruta/al/gtfs_metrobus.zip")
         sys.exit(1)
@@ -187,11 +230,11 @@ async def main_async():
     zip_path = sys.argv[1]
     print(f"Procesando {zip_path} ...")
     rutas, estaciones, ruta_estaciones = extraer_datos_metrobus(zip_path)
-    await cargar_en_base_de_datos(rutas, estaciones, ruta_estaciones)
+    await cargar_en_base_de_datos(zip_path, rutas, estaciones, ruta_estaciones)
     print("Listo.")
 
 
-def main():
+def main() -> None:
     asyncio.run(main_async())
 
 
