@@ -8,45 +8,36 @@ GET /mapa/vehiculos   → FeatureCollection de puntos (posiciones actuales)
 GET /mapa/rutas       → FeatureCollection de LineStrings (trazos de linea)
 """
 
-from fastapi import APIRouter, Depends
 import asyncpg
+from fastapi import APIRouter, Depends
 
 from app.db.session import get_db
-from app.repositories.estaciones_repository import get_estacion_cercana
-from app.repositories.rutas_repository import get_todas_las_rutas
-from app.repositories.shapes_repository import get_todos_los_puntos
-from app.repositories.vehiculos_repository import get_todos_vehiculos
-
-# Importamos get_db para estaciones -- necesitamos una query de "todas"
-from app.db.session import get_db
+from app.services.mapa_service import (
+    obtener_estaciones_para_mapa,
+    obtener_rutas_para_mapa,
+    obtener_vehiculos_para_mapa,
+)
 
 router = APIRouter(prefix="/mapa", tags=["mapa"])
-
-_SQL_TODAS_ESTACIONES = """
-    SELECT stop_id, nombre, lat, lon FROM estaciones
-"""
 
 
 @router.get("/estaciones")
 async def mapa_estaciones(conn: asyncpg.Connection = Depends(get_db)):
-    """
-    Todas las estaciones de Metrobus como GeoJSON FeatureCollection.
-    """
-    filas = await conn.fetch(_SQL_TODAS_ESTACIONES)
+    """Todas las estaciones de Metrobus como GeoJSON FeatureCollection."""
+    estaciones = await obtener_estaciones_para_mapa(conn)
     features = [
         {
             "type": "Feature",
             "geometry": {
                 "type": "Point",
-                # GeoJSON usa [lon, lat] -- no [lat, lon]
-                "coordinates": [float(f["lon"]), float(f["lat"])],
+                "coordinates": [e.lon, e.lat],
             },
             "properties": {
-                "stop_id": f["stop_id"],
-                "nombre": f["nombre"],
+                "stop_id": e.stop_id,
+                "nombre": e.nombre,
             },
         }
-        for f in filas
+        for e in estaciones
     ]
     return {"type": "FeatureCollection", "features": features}
 
@@ -58,7 +49,7 @@ async def mapa_vehiculos(conn: asyncpg.Connection = Depends(get_db)):
     FeatureCollection. Refresca cada 30s en el cliente para el mapa
     en vivo.
     """
-    vehiculos = await get_todos_vehiculos(conn)
+    vehiculos = await obtener_vehiculos_para_mapa(conn)
     features = [
         {
             "type": "Feature",
@@ -83,28 +74,25 @@ async def mapa_vehiculos(conn: asyncpg.Connection = Depends(get_db)):
 async def mapa_rutas(conn: asyncpg.Connection = Depends(get_db)):
     """
     Trazos geometricos de todas las rutas como GeoJSON FeatureCollection
-    de LineStrings. Incluye color y nombre comercial de cada linea para
-    que Mapbox pueda estilizarlas correctamente.
+    de LineStrings.
     """
-    rutas = {r.route_id: r for r in await get_todas_las_rutas(conn)}
-    shapes = await get_todos_los_puntos(conn)
+    rutas, shapes = await obtener_rutas_para_mapa(conn)
+    rutas_dict = {r.route_id: r for r in rutas}
 
-    features = []
-    for route_id, puntos in shapes.items():
-        ruta = rutas.get(route_id)
-        features.append(
-            {
-                "type": "Feature",
-                "geometry": {
-                    "type": "LineString",
-                    "coordinates": [[p.lon, p.lat] for p in puntos],
-                },
-                "properties": {
-                    "route_id": route_id,
-                    "nombre_corto": ruta.nombre_corto if ruta else None,
-                    "nombre_largo": ruta.nombre_largo if ruta else None,
-                    "color": f"#{ruta.color}" if ruta and ruta.color else "#000000",
-                },
-            }
-        )
+    features = [
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "LineString",
+                "coordinates": [[p.lon, p.lat] for p in puntos],
+            },
+            "properties": {
+                "route_id": route_id,
+                "nombre_corto": rutas_dict[route_id].nombre_corto if route_id in rutas_dict else None,
+                "nombre_largo": rutas_dict[route_id].nombre_largo if route_id in rutas_dict else None,
+                "color": f"#{rutas_dict[route_id].color}" if route_id in rutas_dict and rutas_dict[route_id].color else "#000000",
+            },
+        }
+        for route_id, puntos in shapes.items()
+    ]
     return {"type": "FeatureCollection", "features": features}

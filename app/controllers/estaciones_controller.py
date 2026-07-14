@@ -6,9 +6,9 @@ import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.db.session import get_db
-from app.repositories.estaciones_repository import (
-    get_estacion_cercana,
-    get_estado_estacion,
+from app.services.estaciones_service import (
+    obtener_estacion_cercana,
+    obtener_estado_estacion,
 )
 
 router = APIRouter(prefix="/estaciones", tags=["estaciones"])
@@ -24,7 +24,7 @@ async def estacion_cercana(
     Devuelve la estacion de Metrobus mas cercana a las coordenadas
     indicadas.
     """
-    estacion = await get_estacion_cercana(conn, lat, lon)
+    estacion = await obtener_estacion_cercana(conn, lat, lon)
     if estacion is None:
         raise HTTPException(status_code=404, detail="No se encontraron estaciones.")
     return estacion.model_dump()
@@ -37,10 +37,9 @@ async def estado_estacion(
 ):
     """
     Dada una estacion, devuelve todas las rutas que pasan por ella
-    y el ultimo paso registrado de cada una. Es el endpoint principal
-    para responder: 'ya paso el camion?' y 'hace cuanto?'
+    y el ultimo paso registrado de cada una.
     """
-    estado = await get_estado_estacion(conn, stop_id)
+    estado = await obtener_estado_estacion(conn, stop_id)
     if estado is None:
         raise HTTPException(
             status_code=404,

@@ -1,19 +1,12 @@
 """
 Controller: pasos registrados.
-
-GET /estaciones/{stop_id}/ultimo-paso?route_id=
-    Responde: "ya paso el camion de la linea X?" y "hace cuanto?"
-
-GET /estaciones/{stop_id}/pasos?route_id=
-    Devuelve el historial reciente (hasta 10) de pasos en esa
-    estacion para esa ruta.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Query
 import asyncpg
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.db.session import get_db
-from app.repositories.pasos_repository import get_ultimo_paso, get_ultimos_pasos
+from app.services.pasos_service import obtener_ultimo_paso, obtener_ultimos_pasos
 
 router = APIRouter(prefix="/estaciones", tags=["pasos"])
 
@@ -26,9 +19,9 @@ async def ultimo_paso(
 ):
     """
     Devuelve el ultimo paso confirmado de un camion de la ruta
-    indicada en esta estacion, con el timestamp exacto.
+    indicada en esta estacion.
     """
-    paso = await get_ultimo_paso(conn, stop_id, route_id)
+    paso = await obtener_ultimo_paso(conn, stop_id, route_id)
     if paso is None:
         raise HTTPException(
             status_code=404,
@@ -45,7 +38,7 @@ async def historial_pasos(
 ):
     """
     Devuelve los ultimos pasos registrados (hasta 10) de la ruta
-    indicada en esta estacion. Util para estimar frecuencia de paso.
+    indicada en esta estacion.
     """
-    pasos = await get_ultimos_pasos(conn, stop_id, route_id)
+    pasos = await obtener_ultimos_pasos(conn, stop_id, route_id)
     return [p.model_dump() for p in pasos]
