@@ -18,7 +18,7 @@ en formato GeoJSON.
 ## Stack
 
 - **Python 3.12**, **FastAPI**, **asyncpg**
-- **PostgreSQL 16** + **PostGIS 3.4** (para consultas espaciales)
+- **PostgreSQL 16** + **PostGIS 3.4**
 - **Docker Compose**
 
 ## Arquitectura
