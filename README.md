@@ -65,6 +65,8 @@ GET /estaciones/cercana?lat={lat}&lon={lon}
 ```
 La estación más cercana usando el índice GIST de PostGIS, regresa algo como:
 ```
+http://localhost:8000/estaciones/cercana?lat=19.3947&lon=-99.1433
+
 stop_id	"f85782"
 nombre	"Álamos"
 lat	19.39472362659874
@@ -77,6 +79,8 @@ GET /estaciones/{stop_id}/estado
 Todas las rutas que pasan por una estación y el último paso registrado
 de cada una. Es el endpoint principal para el que se creó el proyecto.
 ```
+http://localhost:8000/estaciones/319cb7/estado
+
 stop_id	"319cb7"
 nombre	"Indios Verdes L1"
 rutas	
