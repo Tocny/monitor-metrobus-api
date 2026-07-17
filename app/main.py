@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app.api.routes import debug, health
+from app.controllers import estaciones_controller, mapa_controller, pasos_controller
 from app.core.config import get_settings
 from app.db.session import close_pool, init_models
 from app.services.worker import detener_worker, iniciar_worker
@@ -31,7 +32,9 @@ app = FastAPI(
 )
 
 app.include_router(health.router)
-app.include_router(debug.router)
+app.include_router(estaciones_controller.router)
+app.include_router(pasos_controller.router)
+app.include_router(mapa_controller.router)
 
 
 @app.get("/")

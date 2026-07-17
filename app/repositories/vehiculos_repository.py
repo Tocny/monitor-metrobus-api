@@ -17,6 +17,12 @@ _SQL_GET_VEHICULO = """
     WHERE vehicle_id = $1
 """
 
+_SQL_GET_TODOS = """
+    SELECT vehicle_id, label, route_id, lat, lon, velocidad,
+           feed_timestamp, estacion_actual_id, actualizado_en
+    FROM vehiculos_actuales
+"""
+
 _SQL_UPSERT_VEHICULO = """
     INSERT INTO vehiculos_actuales
         (vehicle_id, label, route_id, lat, lon, velocidad,
@@ -41,6 +47,13 @@ async def get_vehiculo(
     if fila is None:
         return None
     return VehiculoActual(**dict(fila))
+
+
+async def get_todos_vehiculos(
+    conn: asyncpg.Connection,
+) -> list[VehiculoActual]:
+    filas = await conn.fetch(_SQL_GET_TODOS)
+    return [VehiculoActual(**dict(f)) for f in filas]
 
 
 async def upsert_vehiculo(

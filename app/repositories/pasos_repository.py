@@ -3,7 +3,6 @@ Repository de pasos registrados.
 
 Incluye la logica de poda (retencion) porque es una operacion de
 datos pura -- no hay logica de negocio involucrada.
-Reemplaza app/services/retencion.py.
 """
 
 import asyncpg
@@ -24,6 +23,14 @@ _SQL_ULTIMO_PASO = """
     WHERE estacion_id = $1 AND route_id = $2
     ORDER BY detectado_en DESC
     LIMIT 1
+"""
+
+_SQL_ULTIMOS_PASOS = """
+    SELECT id, estacion_id, route_id, vehicle_id, label, detectado_en
+    FROM pasos_registrados
+    WHERE estacion_id = $1 AND route_id = $2
+    ORDER BY detectado_en DESC
+    LIMIT $3
 """
 
 _SQL_PODAR = """
@@ -63,6 +70,16 @@ async def get_ultimo_paso(
     if fila is None:
         return None
     return PasoRegistrado(**dict(fila))
+
+
+async def get_ultimos_pasos(
+    conn: asyncpg.Connection,
+    estacion_id: str,
+    route_id: str,
+    limite: int = MAX_PASOS_POR_ESTACION_RUTA,
+) -> list[PasoRegistrado]:
+    filas = await conn.fetch(_SQL_ULTIMOS_PASOS, estacion_id, route_id, limite)
+    return [PasoRegistrado(**dict(f)) for f in filas]
 
 
 async def podar_pasos(

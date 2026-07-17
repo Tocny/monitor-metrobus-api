@@ -2,7 +2,6 @@
 Controller: endpoints temporales de depuracion.
 
 Pensados solo para validar que el feed funciona de extremo a extremo.
-Quitar o proteger antes de exponer el servicio publicamente.
 """
 
 from fastapi import APIRouter, HTTPException
