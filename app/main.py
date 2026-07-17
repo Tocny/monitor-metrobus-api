@@ -32,7 +32,6 @@ app = FastAPI(
 )
 
 app.include_router(health.router)
-app.include_router(debug.router)
 app.include_router(estaciones_controller.router)
 app.include_router(pasos_controller.router)
 app.include_router(mapa_controller.router)
