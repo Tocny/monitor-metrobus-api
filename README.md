@@ -201,3 +201,5 @@ las renueva antes de que expiren, sin intervención
 manual.
 
 Los timestamps del feed están en Unix epoch (UTC).
+
+Los datos de latitud y longitud están en grados decimales WGS84
