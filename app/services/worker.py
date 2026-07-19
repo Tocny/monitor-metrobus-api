@@ -1,9 +1,27 @@
 """
-Service: worker de polling (Fase 3).
+Service: worker de polling.
 
-Responsabilidad: orquestar el ciclo de monitoreo cada 30 segundos.
-No contiene SQL -- delega todo acceso a datos a los repositories.
-No sabe de HTTP -- delega la obtencion del feed a metrobus_client.
+Contiene el ciclo de monitoreo cada 30 segundos para
+detectar el paso de vehículos por estaciones y actualizar la última
+posición conocida de cada vehículo.
+
+Flujo principal:
+    1. Obtiene posiciones de autobuses desde el feed (vía metrobus_client).
+    2. Para cada autobús, calcula si está dentro del radio de una estación
+       de su ruta (usando distancia_metros).
+    3. Si el autobús entró en el radio (y antes no estaba), registra un "paso"
+       en la tabla pasos_registrados (vía pasos_repository).
+    4. Actualiza la última posición conocida del autobús en vehiculos_actuales
+       (vía vehiculos_repository).
+    5. Espera 30 segundos y repite.
+
+El worker se ejecuta como una tarea asíncrona en segundo plano.
+
+Dependencias:
+    - app.services.metrobus_client: Descarga y parsea el feed GTFS-RT.
+    - app.repositories.*: Operaciones de base de datos.
+    - app.services.geo: Cálculo de distancias Haversine.
+    - app.core.config: Configuración.
 """
 
 import asyncio
@@ -26,11 +44,13 @@ logger = logging.getLogger(__name__)
 settings = get_settings()
 
 _worker_task: asyncio.Task | None = None
+"""
+Referencia a la tarea asíncrona del worker, para poder cancelarla
+limpiamente al apagar la aplicación.
+"""
 
 
-# ---------------------------------------------------------------------------
-# Logica de negocio: deteccion de pasos
-# ---------------------------------------------------------------------------
+# Lógica de detección de pasos
 
 async def _detectar_paso(
     conn: asyncpg.Connection,
@@ -38,14 +58,36 @@ async def _detectar_paso(
     cache_estaciones: dict,
 ) -> None:
     """
-    Compara la posicion nueva del vehiculo contra las estaciones de su
-    ruta. Si cruzo de FUERA a DENTRO del radio de una estacion,
-    registra el paso.
+    Detecta si un vehículo ha pasado por una estación.
+
+    Compara la posición actual del vehículo contra las estaciones de su ruta.
+    Si el vehículo entró en el radio de una estación y antes no estaba en
+    ninguna, registra un paso en la base de datos.
+
+    La lógica se basa en la transición FUERA -> DENTRO del radio de la
+    estación para evitar registrar pasos duplicados si el vehículo se
+    queda detenido en la estación.
+
+    Args:
+        conn: Conexión activa a PostgreSQL.
+        vehiculo_nuevo: Vehículo con la posición actual.
+        cache_estaciones: Diccionario en memoria para cachear las estaciones
+            de cada ruta.
+
+    Raises:
+        ValueError: Si el vehículo no tiene route_id (se maneja).
+        DatabaseError: Si falla la consulta a la base de datos .
+
+    Afecta:
+        - Actualiza vehiculo_nuevo.estacion_actual_id con la estación
+          encontrada (o None si está fuera de toda estación).
+        - Inserta un registro en pasos_registrados si detecta un paso.
     """
     route_id = vehiculo_nuevo.route_id
     if not route_id:
         return
 
+    # Cargar estaciones de la ruta
     if route_id not in cache_estaciones:
         cache_estaciones[route_id] = await get_estaciones_de_ruta(conn, route_id)
 
@@ -53,7 +95,7 @@ async def _detectar_paso(
     if not estaciones:
         return
 
-    # Estacion en cuyo radio se encuentra el vehiculo ahora.
+    # Encontrar la estación más cercana dentro del radio
     estacion_actual_id = None
     for est in estaciones:
         if distancia_metros(
@@ -64,11 +106,11 @@ async def _detectar_paso(
 
     vehiculo_nuevo.estacion_actual_id = estacion_actual_id
 
-    # Estado anterior del vehiculo en la BD.
+    # Obtener estado anterior del vehículo
     vehiculo_anterior = await get_vehiculo(conn, vehiculo_nuevo.vehicle_id)
     estacion_anterior_id = vehiculo_anterior.estacion_actual_id if vehiculo_anterior else None
 
-    # Transicion FUERA -> DENTRO: paso confirmado.
+    # Transición FUERA -> DENTRO: paso confirmado
     if estacion_actual_id and estacion_anterior_id != estacion_actual_id:
         paso = PasoRegistrado(
             estacion_id=estacion_actual_id,
@@ -89,11 +131,19 @@ async def _detectar_paso(
         )
 
 
-# ---------------------------------------------------------------------------
 # Ciclo principal
-# ---------------------------------------------------------------------------
 
 async def _ciclo(pool: asyncpg.Pool) -> None:
+    """
+    Ejecuta una iteración completa del worker (descarga y procesamiento).
+
+    Obtiene los vehículos del feed, actualiza su posición y detecta pasos.
+    Si se registra un error, se aborta el ciclo (no se procesan vehículos
+    hasta la siguiente iteración).
+
+    Args:
+        pool: Pool de conexiones a PostgreSQL.
+    """
     try:
         vehiculos = await obtener_vehiculos_actuales()
     except Exception as e:
@@ -125,6 +175,15 @@ async def _ciclo(pool: asyncpg.Pool) -> None:
 
 
 async def _loop() -> None:
+    """
+    Bucle infinito que ejecuta _ciclo() cada polling_interval_seconds.
+
+    Se ejecuta como una tarea asíncrona en segundo plano. La función
+    iniciar_worker() la lanza, y detener_worker() la termina.
+
+    El bucle captura excepciones a nivel de ciclo, pero si _ciclo() falla
+    de forma inesperada, el error se loguea y el bucle continúa.
+    """
     pool = await get_pool()
     logger.info(
         "Worker iniciado. Intervalo: %ds, radio: %dm.",
@@ -136,16 +195,32 @@ async def _loop() -> None:
         await asyncio.sleep(settings.polling_interval_seconds)
 
 
-# ---------------------------------------------------------------------------
-# API publica (llamada desde main.py lifespan)
-# ---------------------------------------------------------------------------
+# API
 
 async def iniciar_worker() -> None:
+    """
+    Inicia el worker de polling como una tarea asíncrona en segundo plano.
+
+    Esta función se llama desde el lifespan (en main) cuando
+    la aplicación arranca. La tarea se ejecuta en el event loop principal.
+
+    La tarea se almacena en la variable global _worker_task para poder
+    ser cancelada al apagar la aplicación.
+    """
     global _worker_task
     _worker_task = asyncio.create_task(_loop(), name="worker-polling")
 
 
 async def detener_worker() -> None:
+    """
+    Detiene el worker de polling.
+
+    Cancela la tarea asíncrona del worker y espera a que termine.
+
+    Esta función se llama desde el lifespan (en main) cuando
+    la aplicación se apaga, asegurando que no queden tareas en segundo
+    plano colgadas.
+    """
     global _worker_task
     if _worker_task and not _worker_task.done():
         _worker_task.cancel()
