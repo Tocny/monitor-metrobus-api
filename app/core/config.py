@@ -97,6 +97,12 @@ class Settings(BaseSettings):
     )
     """Cadena de conexión a PostgreSQL"""
 
+    database_test_url: str = Field(
+        default="", 
+        description="URL de conexión para tests (DATABASE_TEST_URL en .env)"
+    )
+    """Cadena de conexión a una base de datos de pruebas"""
+
     #  Parámetros del worker de polling
     polling_interval_seconds: int = Field(
         default=30,
