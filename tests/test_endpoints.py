@@ -26,7 +26,7 @@ from datetime import datetime, timezone
 
 # Health endpoint
 
-async def test_health(client):
+async def test_health(client, mocker):
     """
     Verifica que el endpoint /health responda correctamente.
 
@@ -37,6 +37,10 @@ async def test_health(client):
 
     Asegura que la aplicación está en funcionamiento.
     """
+    mocker.patch(
+        "app.api.routes.health.check_db_connection",
+        return_value=True
+    )
     resp = await client.get("/health")
     assert resp.status_code == 200
     data = resp.json()
