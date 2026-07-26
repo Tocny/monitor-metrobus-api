@@ -28,7 +28,7 @@ from collections.abc import AsyncGenerator
 import asyncpg
 
 from app.core.config import get_settings
-from app.db.schema import DDL_SQL
+from app.db.schema import get_sentencias
 
 # Configuración
 settings = get_settings()
@@ -135,7 +135,8 @@ async def init_models() -> None:
     """
     pool = await get_pool()
     async with pool.acquire() as conn:
-        await conn.execute(DDL_SQL)
+        for stmt in get_sentencias():
+            await conn.execute(stmt)
 
 
 async def close_pool() -> None:
