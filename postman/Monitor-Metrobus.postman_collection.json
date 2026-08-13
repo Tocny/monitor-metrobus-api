@@ -1,0 +1,253 @@
+{
+	"info": {
+		"_postman_id": "ecbcb0c4-3f63-4e32-9c82-963c280a3eb6",
+		"name": "Monitor-Metrobus",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+		"_exporter_id": "52677577",
+		"_collection_link": "https://winter-trinity-361345.postman.co/workspace/Tocny's-Workspace~71b92bea-102f-4484-86a6-3f526100dfae/collection/52677577-ecbcb0c4-3f63-4e32-9c82-963c280a3eb6?action=share&source=collection_link&creator=52677577"
+	},
+	"item": [
+		{
+			"name": "Health",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"pm.test(\"Status code is 200\", function () {",
+							"    pm.response.to.have.status(200);",
+							"});",
+							"",
+							"pm.test(\"Response time is less than 200ms\", function () {",
+							"    pm.response.to.have.responseTime.below(200);",
+							"});",
+							"",
+							"const json = pm.response.json();",
+							"",
+							"pm.test(\"Status is ok\", function () {",
+							"    pm.expect(json.status).to.eql(\"ok\");",
+							"});",
+							"",
+							"pm.test(\"App name is correct\", function () {",
+							"    pm.expect(json.app).to.eql(\"Monitor Metrobus API\");",
+							"});",
+							"",
+							"pm.test(\"Environment is development\", function () {",
+							"    pm.expect(json.environment).to.eql(\"development\");",
+							"});",
+							"",
+							"pm.test(\"Database is connected\", function () {",
+							"    pm.expect(json.database_connected).to.eql(true);",
+							"});"
+						],
+						"type": "text/javascript",
+						"packages": {},
+						"requests": {}
+					}
+				}
+			],
+			"protocolProfileBehavior": {
+				"disableBodyPruning": true
+			},
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "{{monitor-metrobus-url}}/health",
+					"host": [
+						"{{monitor-metrobus-url}}"
+					],
+					"path": [
+						"health"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Estacion Cercana",
+			"event": [
+				{
+					"listen": "prerequest",
+					"script": {
+						"exec": [
+							"// Generar coordenadas aleatorias dentro de CDMX",
+							"const minLat = 19.048;",
+							"const maxLat = 19.592;",
+							"const minLon = -99.365;",
+							"const maxLon = -98.940;",
+							"",
+							"// Calcular números aleatorios.",
+							"const lat = (Math.random() * (maxLat - minLat) + minLat);",
+							"const lon = (Math.random() * (maxLon - minLon) + minLon);",
+							"",
+							"// Seteamos en las variables.",
+							"pm.variables.set(\"lat\", lat);",
+							"pm.variables.set(\"lon\", lon);",
+							""
+						],
+						"type": "text/javascript",
+						"packages": {},
+						"requests": {}
+					}
+				},
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"pm.test(\"Response status code is 200\", function (){",
+							"    pm.response.to.have.status(200);",
+							"});",
+							"",
+							"pm.test(\"Is a json\", function (){",
+							"    pm.response.to.be.json;",
+							"});",
+							"",
+							"const json = pm.response.json();",
+							"",
+							"pm.test(\"Response contains correct parametters\",function(){",
+							"    pm.expect(json).to.have.property(\"stop_id\");",
+							"    pm.expect(json).to.have.property(\"nombre\");",
+							"    pm.expect(json).to.have.property(\"lat\");",
+							"    pm.expect(json).to.have.property(\"lon\");",
+							"});",
+							"",
+							"pm.test(\"Response has correct types\", function (){",
+							"    pm.expect(json.stop_id).to.be.an('string');",
+							"    pm.expect(json.nombre).to.be.an('string');",
+							"    pm.expect(json.lat).to.be.a('number');",
+							"    pm.expect(json.lon).to.be.a('number');",
+							"});"
+						],
+						"type": "text/javascript",
+						"packages": {},
+						"requests": {}
+					}
+				}
+			],
+			"protocolProfileBehavior": {
+				"disableBodyPruning": true
+			},
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "http://localhost:8000/estaciones/cercana?lat={{lat}}&lon={{lon}}",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "8000",
+					"path": [
+						"estaciones",
+						"cercana"
+					],
+					"query": [
+						{
+							"key": "lat",
+							"value": "{{lat}}",
+							"description": "latitud"
+						},
+						{
+							"key": "lon",
+							"value": "{{lon}}",
+							"description": "longitud"
+						}
+					]
+				},
+				"description": "## Estación Cercana\n\nVerifica y devuelve la estación de metro o metrobús más cercana a dos coordenadas geográficas dadas (latitud y longitud).\n\n---\n\n### Método y URL\n\n```\nGET http://localhost:8000/estaciones/cercana\n\n ```\n\n---\n\n### Parámetros de consulta (Query Parameters)\n\n| Parámetro | Descripción |\n| --- | --- |\n| `lat` | Latitud de la coordenada de búsqueda. Se establece automáticamente mediante el script de pre-solicitud como `{{lat}}`. |\n| `lon` | Longitud de la coordenada de búsqueda. Se establece automáticamente mediante el script de pre-solicitud como `{{lon}}`. |\n\n---\n\n### Script de pre-solicitud\n\nAntes de enviar la petición, se ejecuta un script que genera coordenadas aleatorias dentro del territorio mexicano. El script utiliza el siguiente bounding box:\n\n- **Latitud:** entre `14.5` y `32.5`\n    \n- **Longitud:** entre `-118.4` y `-86.7`\n    \n\nLas coordenadas generadas se almacenan en las variables `{{lat}}` y `{{lon}}`, que son usadas automáticamente como parámetros de la petición. También se imprimen en la consola para facilitar el seguimiento de cada petición.\n\n---\n\n### Respuesta esperada\n\nLa respuesta es un objeto JSON con los siguientes campos:\n\n| Campo | Descripción |\n| --- | --- |\n| `stop_id` | Identificador único de la estación |\n| `nombre` | Nombre de la estación |\n| `lat` | Latitud de la estación encontrada |\n| `lon` | Longitud de la estación encontrada |\n\n**Ejemplo de respuesta (200 OK):**\n\n``` json\n{\n  \"stop_id\": \"f8575f\",\n  \"nombre\": \"Colegio de Bachilleres 1\",\n  \"lat\": 19.5115585384633,\n  \"lon\": -99.19729620587957\n}\n\n ```"
+			},
+			"response": []
+		},
+		{
+			"name": "Estado estacion",
+			"event": [
+				{
+					"listen": "prerequest",
+					"script": {
+						"exec": [
+							"const estaciones = [\"fa077f\", \"fa0781\", \"fa0783\", \"fa078b\", \"fa07a8\", \"f8578f\", \"f85796\", \"f857d3\", \"f85815\"];",
+							"",
+							"const seleccionada = estaciones[Math.floor(Math.random() * estaciones.length)];",
+							"",
+							"pm.variables.set(\"estacion\", seleccionada);"
+						],
+						"type": "text/javascript",
+						"packages": {},
+						"requests": {}
+					}
+				},
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"pm.test(\"Status code is 200\", function () {",
+							"    pm.response.to.have.status(200);",
+							"});",
+							"",
+							"pm.test(\"Json response\", function(){",
+							"    pm.response.to.be.json;",
+							"})",
+							"",
+							"const json = pm.response.json();",
+							"const rutas = json.rutas;",
+							"",
+							"pm.test(\"Estructura correcta de estaciones\", function(){",
+							"    pm.expect(rutas).to.be.an('array');",
+							"})"
+						],
+						"type": "text/javascript",
+						"packages": {},
+						"requests": {}
+					}
+				}
+			],
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{monitor-metrobus-estaciones}}/{{estacion}}/estado",
+					"host": [
+						"{{monitor-metrobus-estaciones}}"
+					],
+					"path": [
+						"{{estacion}}",
+						"estado"
+					]
+				},
+				"description": "## Estado de una Estación\n\nEste endpoint devuelve el estado actual de una estación del Metrobús, identificada por su ID.\n\n### Método y URL\n\n```\nGET http://localhost:8000/estaciones/{{estacion}}/estado\n```\n\n### Parámetro de ruta\n\n| Parámetro | Descripción | Ejemplo |\n|-----------|-------------|---------|\n| `estacion` | ID único de la estación | `fa0783` |\n\n> **Nota:** El script de pre-solicitud selecciona aleatoriamente un ID de estación de una lista predefinida y lo asigna a la variable `{{estacion}}` antes de enviar la petición.\n\n### Respuesta\n\nLa respuesta incluye la información de la estación junto con las rutas que pasan por ella:\n\n- **`stop_id`** — Identificador único de la parada.\n- **`nombre`** — Nombre de la estación.\n- **`rutas`** — Lista de rutas que pasan por la estación. Cada ruta contiene:\n  - `route_id` — Identificador de la ruta.\n  - `nombre_corto` — Nombre corto de la ruta.\n  - `nombre_largo` — Nombre completo de la ruta.\n  - `color` — Color representativo de la ruta.\n  - `ultimo_paso` — Información del último vehículo detectado en la estación:\n    - `vehicle_id` — Identificador del vehículo.\n    - `label` — Etiqueta del vehículo.\n    - `detectado_en` — Marca de tiempo del último paso detectado."
+			},
+			"response": []
+		}
+	]
+}
