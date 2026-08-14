@@ -67,8 +67,9 @@ _SQL_ESTADO_ESTACION = """
         r.nombre_largo,
         r.color,
         p.vehicle_id,
-        p.label      AS vehiculo_label,
-        p.detectado_en
+        p.label       AS vehiculo_label,
+        p.detectado_en,
+        f.intervalo_minutos
     FROM estaciones e
     CROSS JOIN (
         SELECT DISTINCT route_id
@@ -83,10 +84,12 @@ _SQL_ESTADO_ESTACION = """
         ORDER BY detectado_en DESC
         LIMIT 1
     ) p ON true
+    LEFT JOIN frecuencias f
+        ON f.estacion_id = $1 AND f.route_id = re.route_id
     WHERE e.stop_id = $1
     ORDER BY r.nombre_corto, r.route_id
 """
-# 3. Estado completo de una estación (nombre, rutas, último paso)
+# 3. Estado completo de una estación (nombre, rutas, último paso y frecuencia)
 
 # Obtiene, en una sola consulta, el nombre de la estación,
 # todas las rutas que pasan por ella, y el último paso registrado en
@@ -106,7 +109,8 @@ _SQL_ESTADO_ESTACION = """
 #      - LEFT JOIN asegura que aunque no haya pasos, la ruta aparezca
 #        con p.vehicle_id = NULL.
 #   5. WHERE e.stop_id = $1 : filtramos la estación.
-#   6. ORDER BY r.nombre_corto, r.route_id : ordenamos las rutas
+#   6. Left Join con la tabla de frecuencias .
+#   7. ORDER BY r.nombre_corto, r.route_id : ordenamos las rutas
 #      por nombre corto.
 # 
 
@@ -220,6 +224,7 @@ async def get_estado_estacion(
             nombre_largo=f["nombre_largo"],
             color=color,
             ultimo_paso=ultimo_paso,
+            frecuencia_minutos=f["intervalo_minutos"],
         ))
 
     return EstadoEstacion(

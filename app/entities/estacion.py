@@ -92,6 +92,7 @@ class RutaConUltimoPaso(BaseModel):
         nombre_largo: Descripción extendida de la ruta (ej. "L03d03-1 tenayuca - la raza").
         color: Código de color en formato hexadecimal (ej. "#7A9A01").
         ultimo_paso: Último paso registrado para esta estación y ruta. puede ser None.
+        frecuencia_minutos: frecuencia promedio de pasos.
 
     Example:
         >>> ruta = RutaConUltimoPaso(
@@ -106,6 +107,7 @@ class RutaConUltimoPaso(BaseModel):
     nombre_largo: str | None = None
     color: str | None = None
     ultimo_paso: UltimoPasoResumen | None = None
+    frecuencia_minutos: float | None = None
 
 
 class EstadoEstacion(BaseModel):
