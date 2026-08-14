@@ -189,6 +189,20 @@ COMMENT ON COLUMN shapes.lat IS 'Latitud del punto en el sistema de coordenadas 
 COMMENT ON COLUMN shapes.lon IS 'Longitud del punto en el sistema de coordenadas WGS84 (EPSG:4326).';
 
 -- ----------------------------------------------------------------
+-- Tabla: frecuencias
+-- ----------------------------------------------------------------
+-- Frecuencia promedio de paso por combinación estación-ruta.
+-- Una sola fila por (estacion_id, route_id).
+CREATE TABLE IF NOT EXISTS frecuencias (
+    estacion_id       TEXT NOT NULL REFERENCES estaciones(stop_id),
+    route_id          TEXT NOT NULL REFERENCES rutas(route_id),
+    intervalo_minutos DOUBLE PRECISION,
+    calculado_en      TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (estacion_id, route_id)
+);
+
+
+-- ----------------------------------------------------------------
 -- La base de datos.
 -- ----------------------------------------------------------------
 COMMENT ON DATABASE metrobus IS 'Base de datos del proyecto Monitor Metrobús. Contiene datos estáticos (rutas, estaciones) y dinámicos (vehículos en tiempo real, pasos registrados). Usa PostGIS para cálculos geográficos.';
