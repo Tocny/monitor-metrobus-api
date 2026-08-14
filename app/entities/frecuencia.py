@@ -26,7 +26,7 @@ class FrecuenciaRutaEstacion(BaseModel):
     del servicio y para estimar tiempos de espera.
 
     Attributes:
-        stop_id: Identificador de la estación (stop_id). 
+        estacion_id: Identificador de la estación (estacion_id). 
         route_id: Identificador de la ruta (route_id). 
         intervalo_minutos: Intervalo promedio entre vehículos, en minutos.
         calculado_en: Marca de tiempo con zona horaria (UTC) que indica
@@ -35,14 +35,14 @@ class FrecuenciaRutaEstacion(BaseModel):
     Example:
         >>> from datetime import datetime, timezone
         >>> frecuencia = FrecuenciaRutaEstacion(
-        ...     stop_id="fa078a",
+        ...     estacion_id="fa078a",
         ...     route_id="insurgentes",
         ...     intervalo_minutos=7.5,
         ...     calculado_en=datetime.now(timezone.utc)
         ... )
         >>> print(frecuencia.model_dump_json())
     """
-    stop_id: str
+    estacion_id: str
     route_id: str
     intervalo_minutos: float | None = None  # None si hay menos de 2 pasos en la ventana
     calculado_en: datetime
