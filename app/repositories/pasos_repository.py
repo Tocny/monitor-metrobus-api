@@ -25,7 +25,7 @@ import asyncpg
 from app.entities.paso import PasoRegistrado
 
 
-MAX_PASOS_POR_ESTACION_RUTA: int = 10
+MAX_PASOS_POR_ESTACION_RUTA: int = 30
 """
 Número máximo de pasos que se conservan por cada combinación de
 (estacion_id, route_id). Los pasos más antiguos se eliminan

@@ -39,13 +39,15 @@ from app.repositories.pasos_repository import insertar_paso
 from app.repositories.vehiculos_repository import get_vehiculo, upsert_vehiculo
 from app.services.geo import distancia_metros
 from app.services.metrobus_client import obtener_vehiculos_actuales
+from app.services.frecuencias_service import recalcular_frecuencias
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
-_worker_task: asyncio.Task | None = None
+_worker_polling_task: asyncio.Task | None = None
+_worker_frecuencias_task: asyncio.Task | None = None
 """
-Referencia a la tarea asíncrona del worker, para poder cancelarla
+Referencia a las tareas asíncrona de los workers, para poder cancelarlas
 limpiamente al apagar la aplicación.
 """
 
@@ -133,7 +135,7 @@ async def _detectar_paso(
 
 # Ciclo principal
 
-async def _ciclo(pool: asyncpg.Pool) -> None:
+async def _ciclo_polling(pool: asyncpg.Pool) -> None:
     """
     Ejecuta una iteración completa del worker (descarga y procesamiento).
 
@@ -174,14 +176,14 @@ async def _ciclo(pool: asyncpg.Pool) -> None:
     logger.debug("Ciclo completado: %d vehiculos procesados.", len(vehiculos))
 
 
-async def _loop() -> None:
+async def _loop_polling() -> None:
     """
-    Bucle infinito que ejecuta _ciclo() cada polling_interval_seconds.
+    Bucle que ejecuta _ciclo_polling() cada polling_interval_seconds.
 
     Se ejecuta como una tarea asíncrona en segundo plano. La función
     iniciar_worker() la lanza, y detener_worker() la termina.
 
-    El bucle captura excepciones a nivel de ciclo, pero si _ciclo() falla
+    El bucle captura excepciones a nivel de ciclo, pero si _ciclo_polling() falla
     de forma inesperada, el error se loguea y el bucle continúa.
     """
     pool = await get_pool()
@@ -191,15 +193,62 @@ async def _loop() -> None:
         settings.station_radius_meters,
     )
     while True:
-        await _ciclo(pool)
+        await _ciclo_polling(pool)
         await asyncio.sleep(settings.polling_interval_seconds)
 
+async def _loop_frecuencias() -> None:
+    """
+    Bucle del worker de frecuencias.
+
+    Se ejecuta en segundo plano y recalcula periódicamente las frecuencias
+    promedio de paso para todas las combinaciones estación-ruta.
+    El intervalo entre cálculos y la ventana de tiempo de análisis se
+    toman de la configuración (settings).
+
+    El bucle:
+        1. Espera el intervalo de cálculo (en segundos).
+        2. Adquiere una conexión del pool.
+        3. Llama a recalcular_frecuencias() con la ventana de análisis.
+        5. Vuelve a esperar y repite.
+
+    Esta función está  para ejecutarse como una tarea asíncrona
+    y ser cancelada al detener la aplicación.
+    """
+    pool = await get_pool()
+
+    # Convertir el intervalo de cálculo de minutos a segundos para asyncio.sleep()
+    intervalo_calculo = settings.frecuencia_intervalo_calculo_minutos * 60
+
+    # Ventana de tiempo hacia atrás (en minutos) que se usa para calcular el promedio
+    intervalo_analisis = settings.frecuencia_intervalo_analisis_minutos
+
+    # Log de inicio del worker con los parámetros configurados
+    logger.info(
+        "Worker de frecuencias iniciado. Calcula cada %d min sobre ventana de %d min.",
+        settings.frecuencia_intervalo_calculo_minutos,
+        intervalo_analisis,
+    )
+
+    while True:
+        await asyncio.sleep(intervalo_calculo)
+        try:
+            # Adquirir una conexión del pool (contexto async with)
+            async with pool.acquire() as conn:
+                # Ejecutar el recálculo de frecuencias
+                await recalcular_frecuencias(conn, intervalo_analisis)
+
+            logger.debug(
+                "Frecuencias recalculadas (ventana: %d min).", intervalo_analisis
+            )
+
+        except Exception as e:
+            logger.error("Error al recalcular frecuencias: %s", e)
 
 # API
 
 async def iniciar_worker() -> None:
     """
-    Inicia el worker de polling como una tarea asíncrona en segundo plano.
+    Inicia el worker de polling y el de frecuencias como tareas asincronas en segundo plano.
 
     Esta función se llama desde el lifespan (en main) cuando
     la aplicación arranca. La tarea se ejecuta en el event loop principal.
@@ -207,13 +256,14 @@ async def iniciar_worker() -> None:
     La tarea se almacena en la variable global _worker_task para poder
     ser cancelada al apagar la aplicación.
     """
-    global _worker_task
-    _worker_task = asyncio.create_task(_loop(), name="worker-polling")
+    global _worker_polling_task, _worker_frecuencias_task
+    _worker_polling_task = asyncio.create_task(_loop_polling(), name="worker-polling")
+    _worker_frecuencias_task = asyncio.create_task(_loop_frecuencias(), name="worker-frecuencias")
 
 
 async def detener_worker() -> None:
     """
-    Detiene el worker de polling.
+    Detiene el worker de polling y de frecuencias.
 
     Cancela la tarea asíncrona del worker y espera a que termine.
 
@@ -221,12 +271,14 @@ async def detener_worker() -> None:
     la aplicación se apaga, asegurando que no queden tareas en segundo
     plano colgadas.
     """
-    global _worker_task
-    if _worker_task and not _worker_task.done():
-        _worker_task.cancel()
-        try:
-            await _worker_task
-        except asyncio.CancelledError:
-            pass
-    _worker_task = None
-    logger.info("Worker detenido.")
+    global _worker_polling_task, _worker_frecuencias_task
+    for task in (_worker_polling_task, _worker_frecuencias_task):
+        if task and not task.done():
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+    _worker_polling_task = None
+    _worker_frecuencias_task = None
+    logger.info("Workers detenidos.")

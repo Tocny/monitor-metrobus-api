@@ -116,6 +116,18 @@ class Settings(BaseSettings):
     )
     """Radio en metros para detectar que un vehículo está en una estación (default: 70m)."""
 
+    # --- Worker de frecuencias ---
+    frecuencia_intervalo_analisis_minutos: int = Field(
+        default=30,
+        description="Ventana de tiempo en minutos para calcular la frecuencia promedio",
+    )
+    '''Desde cuanto tiempo atrás se hará el calculo de la frecuencia.'''
+
+    frecuencia_intervalo_calculo_minutos: int = Field(
+        default=5,
+        description="Cada cuántos minutos el worker recalcula las frecuencias",
+    )
+    '''Cada cuantos minutos se recalcula la frecuencia'''
 
 @lru_cache
 def get_settings() -> Settings:
