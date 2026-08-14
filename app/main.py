@@ -20,7 +20,7 @@ from fastapi import Request
 
 settings = get_settings()
 
-# Rate limiter global: 100 peticiones por minuto por IP
+# Rate limiter de todos los endpoints: 100 peticiones por minuto por IP
 limiter = Limiter(key_func=get_remote_address, default_limits=["100/minute"])
 
 
@@ -38,6 +38,9 @@ app = FastAPI(
     description="Sistema de monitoreo en tiempo real de Metrobus CDMX",
     version="0.1.0",
     lifespan=lifespan,
+    docs_url=None if settings.environment == "production" else "/docs",
+    redoc_url=None if settings.environment == "production" else "/redoc",
+    openapi_url=None if settings.environment == "production" else "/openapi.json",
 )
 
 # Config rate limiter
