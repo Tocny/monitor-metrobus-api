@@ -74,6 +74,18 @@ app.add_middleware(
     allow_credentials=True,
 )
 
+# Config del middleware de loggin.
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    start_time = time.time()
+    response = await call_next(request)
+    process_time = time.time() - start_time
+    logger.info(
+        f"{request.client.host} - {request.method} {request.url.path} "
+        f"{response.status_code} - {process_time:.3f}s"
+    )
+    return response
+
 #Config rutas
 app.include_router(health.router)
 app.include_router(estaciones_controller.router)
