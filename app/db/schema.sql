@@ -201,6 +201,12 @@ CREATE TABLE IF NOT EXISTS frecuencias (
     PRIMARY KEY (estacion_id, route_id)
 );
 
+COMMENT ON TABLE frecuencias IS 'Frecuencia promedio de paso por combinación estación-ruta.';
+
+COMMENT ON COLUMN frecuencias.estacion_id IS 'Identificador de la estación. Referencia a estaciones.stop_id.';
+COMMENT ON COLUMN frecuencias.route_id IS 'Identificador de la ruta. Referencia a rutas.route_id.';
+COMMENT ON COLUMN frecuencias.intervalo_minutos IS 'Intervalo promedio entre vehículos, medido en minutos. NULL si aún no se ha calculado o no hay datos suficientes.';
+COMMENT ON COLUMN frecuencias.calculado_en IS 'Marca de tiempo con zona horaria que indica cuándo fue calculado o actualizado por última vez este valor.';
 
 -- ----------------------------------------------------------------
 -- La base de datos.
