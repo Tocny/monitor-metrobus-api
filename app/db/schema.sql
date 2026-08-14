@@ -192,18 +192,18 @@ COMMENT ON COLUMN shapes.lon IS 'Longitud del punto en el sistema de coordenadas
 -- Tabla: frecuencias
 -- ----------------------------------------------------------------
 -- Frecuencia promedio de paso por combinación estación-ruta.
--- Una sola fila por (estacion_id, route_id).
+-- Una sola fila por (stop_id, route_id).
 CREATE TABLE IF NOT EXISTS frecuencias (
-    estacion_id       TEXT NOT NULL REFERENCES estaciones(stop_id),
+    stop_id       TEXT NOT NULL REFERENCES estaciones(stop_id),
     route_id          TEXT NOT NULL REFERENCES rutas(route_id),
     intervalo_minutos DOUBLE PRECISION,
     calculado_en      TIMESTAMPTZ NOT NULL,
-    PRIMARY KEY (estacion_id, route_id)
+    PRIMARY KEY (stop_id, route_id)
 );
 
 COMMENT ON TABLE frecuencias IS 'Frecuencia promedio de paso por combinación estación-ruta.';
 
-COMMENT ON COLUMN frecuencias.estacion_id IS 'Identificador de la estación. Referencia a estaciones.stop_id.';
+COMMENT ON COLUMN frecuencias.stop_id IS 'Identificador de la estación. Referencia a estaciones.stop_id.';
 COMMENT ON COLUMN frecuencias.route_id IS 'Identificador de la ruta. Referencia a rutas.route_id.';
 COMMENT ON COLUMN frecuencias.intervalo_minutos IS 'Intervalo promedio entre vehículos, medido en minutos. NULL si aún no se ha calculado o no hay datos suficientes.';
 COMMENT ON COLUMN frecuencias.calculado_en IS 'Marca de tiempo con zona horaria que indica cuándo fue calculado o actualizado por última vez este valor.';
